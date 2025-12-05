@@ -1,4 +1,5 @@
-﻿using System;
+﻿// DDD.Models (models file)
+using System;
 using System.Collections.Generic;
 
 namespace DDD.Models
@@ -14,18 +15,31 @@ namespace DDD.Models
 
     public class Student : User
     {
+        // internal FK remains
         public int PersonalSupervisorId { get; set; } = 0; // 0 => none assigned
+
+        // NEW external code
+        public string StudentCode { get; set; } = string.Empty; // 9-digit code like 202512345
+
+        // Year group (1..4)
+        public int YearGroup { get; set; } = 1;
+
         public List<Meeting> Meetings { get; set; } = new List<Meeting>();
         public List<WellbeingReport> Reports { get; set; } = new List<WellbeingReport>();
     }
 
     public class PersonalSupervisor : User
     {
+        // NEW external code
+        public string SupervisorCode { get; set; } = string.Empty; // PSxxxxx
+
         public List<Meeting> Meetings { get; set; } = new List<Meeting>();
     }
 
     public class SeniorTutor : User
     {
+        // NEW external code
+        public string SeniorTutorCode { get; set; } = string.Empty; // STxxxxx
         // placeholder for future senior-specific fields
     }
 
@@ -45,7 +59,6 @@ namespace DDD.Models
         public string Notes { get; set; } = string.Empty;
         public DateTime Date { get; set; }
     }
-
     public class Message
     {
         public int Id { get; set; } = 0;

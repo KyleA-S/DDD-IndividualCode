@@ -122,10 +122,8 @@ namespace DDD.Utils
                             }
                         }
 
-                        // mark other party's messages as read (Q2 A)
                         messageService.MarkConversationAsRead(student.Id, student.PersonalSupervisorId, "student");
 
-                        // allow edit/delete for your own messages
                         Console.WriteLine();
                         Console.WriteLine("Options: (E)dit message by id, (D)elete message by id, (Enter) to return");
                         var opt = Console.ReadLine() ?? "";
@@ -149,16 +147,6 @@ namespace DDD.Utils
                             else if (opt == "D")
                             {
                                 int mid = InputHelper.GetInt("Message Id to delete: ");
-
-                                // Confirm delete:
-                                Console.Write("Are you sure you want to delete this message? (y/n): ");
-                                var conf = (Console.ReadLine() ?? "").Trim().ToLower();
-                                if (conf != "y")
-                                {
-                                    Console.WriteLine("Delete cancelled.");
-                                    break;
-                                }
-
                                 try
                                 {
                                     messageService.DeleteMessageAsStudent(student, mid);
@@ -169,7 +157,6 @@ namespace DDD.Utils
                                     Console.WriteLine($"Error: {ex.Message}");
                                 }
                             }
-
                         }
 
                         InputHelper.PressEnterToContinue();
@@ -326,10 +313,8 @@ namespace DDD.Utils
                             }
                         }
 
-                        // mark other party's messages as read (Q2 A)
                         messageService.MarkConversationAsRead(student.Id, ps.Id, "supervisor");
 
-                        // allow edit/delete for your own messages
                         Console.WriteLine();
                         Console.WriteLine("Options: (E)dit message by id, (D)elete message by id, (Enter) to return");
                         var opt = Console.ReadLine() ?? "";
@@ -353,16 +338,6 @@ namespace DDD.Utils
                             else if (opt == "D")
                             {
                                 int mid = InputHelper.GetInt("Message Id to delete: ");
-
-                                // Confirm delete:
-                                Console.Write("Are you sure you want to delete this message? (y/n): ");
-                                var conf = (Console.ReadLine() ?? "").Trim().ToLower();
-                                if (conf != "y")
-                                {
-                                    Console.WriteLine("Delete cancelled.");
-                                    break;
-                                }
-
                                 try
                                 {
                                     messageService.DeleteMessageAsSupervisor(ps, mid);
@@ -373,7 +348,6 @@ namespace DDD.Utils
                                     Console.WriteLine($"Error: {ex.Message}");
                                 }
                             }
-
                         }
 
                         InputHelper.PressEnterToContinue();
@@ -529,19 +503,36 @@ namespace DDD.Utils
         #endregion
 
         #region Senior Tutor helpers (existing methods reused)
+
         private static void CreateStudent(SeniorTutorService stService)
         {
             Console.Write("New student's username: ");
             var u = Console.ReadLine() ?? "";
+
             Console.Write("Name: ");
             var n = Console.ReadLine() ?? "";
+
             Console.Write("Password: ");
             var p = Console.ReadLine() ?? "";
 
-            var s = stService.CreateStudent(u, n, p);
-            Console.WriteLine($"Student created with Id {s.Id}");
+            Console.WriteLine("Select year group:");
+            Console.WriteLine("1. First year");
+            Console.WriteLine("2. Second year");
+            Console.WriteLine("3. Third year");
+            Console.WriteLine("4. Fourth year");
+            int yearGroup = InputHelper.GetInt("Year group (1–4): ");
+            if (yearGroup < 1 || yearGroup > 4)
+            {
+                Console.WriteLine("Invalid year group. Cancelling.");
+                InputHelper.PressEnterToContinue();
+                return;
+            }
+
+            var s = stService.CreateStudent(u, n, p, yearGroup);
+            Console.WriteLine($"Student created with Id {s.Id} (External StudentID: {s.StudentCode})");
             InputHelper.PressEnterToContinue();
         }
+
 
         private static void CreatePersonalSupervisor(SeniorTutorService stService)
         {
@@ -683,6 +674,7 @@ namespace DDD.Utils
 
             InputHelper.PressEnterToContinue();
         }
+
         #endregion
     }
 }

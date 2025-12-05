@@ -1,7 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Data;
-using System.Linq;
 using Microsoft.Data.Sqlite;
 using DDD.Models;
 
@@ -33,7 +32,11 @@ namespace DDD.Data
                     Name TEXT NOT NULL,
                     Password TEXT NOT NULL,
                     Role TEXT NOT NULL,
-                    PersonalSupervisorId INTEGER NULL
+                    PersonalSupervisorId INTEGER NULL,
+                    StudentCode TEXT,
+                    SupervisorCode TEXT,
+                    SeniorTutorCode TEXT,
+                    YearGroup INTEGER
                 );
 
                 CREATE TABLE IF NOT EXISTS Meetings (
@@ -69,6 +72,15 @@ namespace DDD.Data
             cmd.ExecuteNonQuery();
         }
 
+        // ---------- Helper ----------
+        private static bool HasColumn(IDataRecord r, string columnName)
+        {
+            for (int i = 0; i < r.FieldCount; i++)
+                if (string.Equals(r.GetName(i), columnName, StringComparison.OrdinalIgnoreCase))
+                    return true;
+            return false;
+        }
+
         #region Mappers & Loaders
         private static Student MapStudent(IDataRecord r)
         {
@@ -78,7 +90,9 @@ namespace DDD.Data
                 Username = r["Username"].ToString(),
                 Name = r["Name"].ToString(),
                 Password = r["Password"].ToString(),
-                PersonalSupervisorId = r["PersonalSupervisorId"] == DBNull.Value ? 0 : Convert.ToInt32(r["PersonalSupervisorId"])
+                PersonalSupervisorId = r["PersonalSupervisorId"] == DBNull.Value ? 0 : Convert.ToInt32(r["PersonalSupervisorId"]),
+                StudentCode = HasColumn(r, "StudentCode") && r["StudentCode"] != DBNull.Value ? r["StudentCode"].ToString() : string.Empty,
+                YearGroup = HasColumn(r, "YearGroup") && r["YearGroup"] != DBNull.Value ? Convert.ToInt32(r["YearGroup"]) : 1
             };
         }
 
@@ -89,7 +103,8 @@ namespace DDD.Data
                 Id = Convert.ToInt32(r["Id"]),
                 Username = r["Username"].ToString(),
                 Name = r["Name"].ToString(),
-                Password = r["Password"].ToString()
+                Password = r["Password"].ToString(),
+                SupervisorCode = HasColumn(r, "SupervisorCode") && r["SupervisorCode"] != DBNull.Value ? r["SupervisorCode"].ToString() : string.Empty
             };
         }
 
@@ -100,7 +115,8 @@ namespace DDD.Data
                 Id = Convert.ToInt32(r["Id"]),
                 Username = r["Username"].ToString(),
                 Name = r["Name"].ToString(),
-                Password = r["Password"].ToString()
+                Password = r["Password"].ToString(),
+                SeniorTutorCode = HasColumn(r, "SeniorTutorCode") && r["SeniorTutorCode"] != DBNull.Value ? r["SeniorTutorCode"].ToString() : string.Empty
             };
         }
 
@@ -193,6 +209,19 @@ namespace DDD.Data
             return s;
         }
 
+        public Student GetStudentByCode(string studentCode)
+        {
+            using var cmd = _conn.CreateCommand();
+            cmd.CommandText = "SELECT * FROM Users WHERE StudentCode = @c AND Role='Student';";
+            cmd.Parameters.AddWithValue("@c", studentCode);
+            using var rdr = cmd.ExecuteReader();
+            if (!rdr.Read()) return null;
+            var s = MapStudent(rdr);
+            s.Meetings = LoadMeetingsForStudent(s.Id);
+            s.Reports = LoadReportsForStudent(s.Id);
+            return s;
+        }
+
         public void SaveStudent(Student student)
         {
             if (student == null) throw new ArgumentNullException(nameof(student));
@@ -200,26 +229,30 @@ namespace DDD.Data
             if (student.Id <= 0)
             {
                 using var cmd = _conn.CreateCommand();
-                cmd.CommandText = @"INSERT INTO Users (Username, Name, Password, Role, PersonalSupervisorId)
-                                    VALUES (@u,@n,@p,'Student', @ps);
+                cmd.CommandText = @"INSERT INTO Users (Username, Name, Password, Role, PersonalSupervisorId, StudentCode, YearGroup)
+                                    VALUES (@u,@n,@p,'Student', @ps, @scode, @yg);
                                     SELECT last_insert_rowid();";
                 cmd.Parameters.AddWithValue("@u", student.Username ?? "");
                 cmd.Parameters.AddWithValue("@n", student.Name ?? "");
                 cmd.Parameters.AddWithValue("@p", student.Password ?? "");
                 if (student.PersonalSupervisorId == 0) cmd.Parameters.AddWithValue("@ps", DBNull.Value);
                 else cmd.Parameters.AddWithValue("@ps", student.PersonalSupervisorId);
+                cmd.Parameters.AddWithValue("@scode", string.IsNullOrEmpty(student.StudentCode) ? DBNull.Value : (object)student.StudentCode);
+                cmd.Parameters.AddWithValue("@yg", student.YearGroup);
                 var id = (long)cmd.ExecuteScalar();
                 student.Id = (int)id;
             }
             else
             {
                 using var cmd = _conn.CreateCommand();
-                cmd.CommandText = @"UPDATE Users SET Username=@u, Name=@n, Password=@p, PersonalSupervisorId=@ps WHERE Id=@id;";
+                cmd.CommandText = @"UPDATE Users SET Username=@u, Name=@n, Password=@p, PersonalSupervisorId=@ps, StudentCode=@scode, YearGroup=@yg WHERE Id=@id;";
                 cmd.Parameters.AddWithValue("@u", student.Username ?? "");
                 cmd.Parameters.AddWithValue("@n", student.Name ?? "");
                 cmd.Parameters.AddWithValue("@p", student.Password ?? "");
                 if (student.PersonalSupervisorId == 0) cmd.Parameters.AddWithValue("@ps", DBNull.Value);
                 else cmd.Parameters.AddWithValue("@ps", student.PersonalSupervisorId);
+                cmd.Parameters.AddWithValue("@scode", string.IsNullOrEmpty(student.StudentCode) ? DBNull.Value : (object)student.StudentCode);
+                cmd.Parameters.AddWithValue("@yg", student.YearGroup);
                 cmd.Parameters.AddWithValue("@id", student.Id);
                 cmd.ExecuteNonQuery();
             }
@@ -312,26 +345,42 @@ namespace DDD.Data
             return ps;
         }
 
+        public PersonalSupervisor GetSupervisorByCode(string supervisorCode)
+        {
+            using var cmd = _conn.CreateCommand();
+            cmd.CommandText = "SELECT * FROM Users WHERE SupervisorCode = @c AND Role='PersonalSupervisor';";
+            cmd.Parameters.AddWithValue("@c", supervisorCode);
+            using var rdr = cmd.ExecuteReader();
+            if (!rdr.Read()) return null;
+            var ps = MapSupervisor(rdr);
+            ps.Meetings = LoadMeetingsForSupervisor(ps.Id);
+            return ps;
+        }
+
         public void SavePersonalSupervisor(PersonalSupervisor supervisor)
         {
             if (supervisor == null) throw new ArgumentNullException(nameof(supervisor));
             if (supervisor.Id <= 0)
             {
                 using var cmd = _conn.CreateCommand();
-                cmd.CommandText = @"INSERT INTO Users (Username, Name, Password, Role) VALUES (@u,@n,@p,'PersonalSupervisor'); SELECT last_insert_rowid();";
+                cmd.CommandText = @"INSERT INTO Users (Username, Name, Password, Role, SupervisorCode)
+                                    VALUES (@u,@n,@p,'PersonalSupervisor', @scode);
+                                    SELECT last_insert_rowid();";
                 cmd.Parameters.AddWithValue("@u", supervisor.Username ?? "");
                 cmd.Parameters.AddWithValue("@n", supervisor.Name ?? "");
                 cmd.Parameters.AddWithValue("@p", supervisor.Password ?? "");
+                cmd.Parameters.AddWithValue("@scode", string.IsNullOrEmpty(supervisor.SupervisorCode) ? DBNull.Value : (object)supervisor.SupervisorCode);
                 var id = (long)cmd.ExecuteScalar();
                 supervisor.Id = (int)id;
             }
             else
             {
                 using var cmd = _conn.CreateCommand();
-                cmd.CommandText = "UPDATE Users SET Username=@u, Name=@n, Password=@p WHERE Id=@id;";
+                cmd.CommandText = "UPDATE Users SET Username=@u, Name=@n, Password=@p, SupervisorCode=@scode WHERE Id=@id;";
                 cmd.Parameters.AddWithValue("@u", supervisor.Username ?? "");
                 cmd.Parameters.AddWithValue("@n", supervisor.Name ?? "");
                 cmd.Parameters.AddWithValue("@p", supervisor.Password ?? "");
+                cmd.Parameters.AddWithValue("@scode", string.IsNullOrEmpty(supervisor.SupervisorCode) ? DBNull.Value : (object)supervisor.SupervisorCode);
                 cmd.Parameters.AddWithValue("@id", supervisor.Id);
                 cmd.ExecuteNonQuery();
             }
@@ -396,26 +445,38 @@ namespace DDD.Data
             return MapSenior(rdr);
         }
 
+        public SeniorTutor GetSeniorTutorByCode(string code)
+        {
+            using var cmd = _conn.CreateCommand();
+            cmd.CommandText = "SELECT * FROM Users WHERE SeniorTutorCode = @c AND Role='SeniorTutor';";
+            cmd.Parameters.AddWithValue("@c", code);
+            using var rdr = cmd.ExecuteReader();
+            if (!rdr.Read()) return null;
+            return MapSenior(rdr);
+        }
+
         public void SaveSeniorTutor(SeniorTutor seniorTutor)
         {
             if (seniorTutor == null) throw new ArgumentNullException(nameof(seniorTutor));
             if (seniorTutor.Id <= 0)
             {
                 using var cmd = _conn.CreateCommand();
-                cmd.CommandText = "INSERT INTO Users (Username, Name, Password, Role) VALUES (@u,@n,@p,'SeniorTutor'); SELECT last_insert_rowid();";
+                cmd.CommandText = "INSERT INTO Users (Username, Name, Password, Role, SeniorTutorCode) VALUES (@u,@n,@p,'SeniorTutor', @scode); SELECT last_insert_rowid();";
                 cmd.Parameters.AddWithValue("@u", seniorTutor.Username ?? "");
                 cmd.Parameters.AddWithValue("@n", seniorTutor.Name ?? "");
                 cmd.Parameters.AddWithValue("@p", seniorTutor.Password ?? "");
+                cmd.Parameters.AddWithValue("@scode", string.IsNullOrEmpty(seniorTutor.SeniorTutorCode) ? DBNull.Value : (object)seniorTutor.SeniorTutorCode);
                 var id = (long)cmd.ExecuteScalar();
                 seniorTutor.Id = (int)id;
             }
             else
             {
                 using var cmd = _conn.CreateCommand();
-                cmd.CommandText = "UPDATE Users SET Username=@u, Name=@n, Password=@p WHERE Id=@id;";
+                cmd.CommandText = "UPDATE Users SET Username=@u, Name=@n, Password=@p, SeniorTutorCode=@scode WHERE Id=@id;";
                 cmd.Parameters.AddWithValue("@u", seniorTutor.Username ?? "");
                 cmd.Parameters.AddWithValue("@n", seniorTutor.Name ?? "");
                 cmd.Parameters.AddWithValue("@p", seniorTutor.Password ?? "");
+                cmd.Parameters.AddWithValue("@scode", string.IsNullOrEmpty(seniorTutor.SeniorTutorCode) ? DBNull.Value : (object)seniorTutor.SeniorTutorCode);
                 cmd.Parameters.AddWithValue("@id", seniorTutor.Id);
                 cmd.ExecuteNonQuery();
             }
@@ -521,7 +582,6 @@ namespace DDD.Data
 
         public void MarkMessagesAsRead(int studentId, int supervisorId, string readerRole)
         {
-            // mark messages where SenderRole != readerRole and IsRead = 0
             using var cmd = _conn.CreateCommand();
             cmd.CommandText = @"
                 UPDATE Messages
