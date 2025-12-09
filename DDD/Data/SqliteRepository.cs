@@ -214,23 +214,29 @@ namespace DDD.Data
         {
             var list = new List<WellbeingReport>();
             using var cmd = _conn.CreateCommand();
-            cmd.CommandText = @"SELECT Id, StudentId, Score, Notes, Date, IsHighPriority FROM Reports WHERE StudentId = @sid ORDER BY Date;";
+            cmd.CommandText = @"SELECT Id, StudentId, Score, Notes, Date, IsHighPriority, IsCurrent 
+                        FROM Reports WHERE StudentId = @sid 
+                        ORDER BY Date DESC;";
             cmd.Parameters.AddWithValue("@sid", studentId);
             using var rdr = cmd.ExecuteReader();
+
             while (rdr.Read())
             {
-                list.Add(new WellbeingReport
+                var report = new WellbeingReport
                 {
                     Id = Convert.ToInt32(rdr["Id"]),
                     StudentId = Convert.ToInt32(rdr["StudentId"]),
                     Score = Convert.ToInt32(rdr["Score"]),
-                    Notes = rdr["Notes"] == DBNull.Value ? string.Empty : rdr["Notes"].ToString(),
+                    Notes = rdr["Notes"] == DBNull.Value ? "" : rdr["Notes"].ToString(),
                     Date = DateTime.Parse(rdr["Date"].ToString()),
-                    IsHighPriority = Convert.ToInt32(rdr["IsHighPriority"]) != 0
-                });
+                    IsHighPriority = Convert.ToInt32(rdr["IsHighPriority"]) != 0,
+                    IsCurrent = Convert.ToInt32(rdr["IsCurrent"]) != 0
+                };
+                list.Add(report);
             }
             return list;
         }
+
 
         private List<WellbeingAlert> LoadAlertsForStudent(int studentId)
         {
@@ -264,11 +270,19 @@ namespace DDD.Data
             cmd.Parameters.AddWithValue("@id", id);
             using var rdr = cmd.ExecuteReader();
             if (!rdr.Read()) return null;
+
             var s = MapStudent(rdr);
             s.Meetings = LoadMeetingsForStudent(s.Id);
-            s.Reports = LoadReportsForStudent(s.Id);
+            var allReports = LoadReportsForStudent(s.Id);
+
+            // Separate current from history
+            s.CurrentWellbeing = allReports.FirstOrDefault(r => r.IsCurrent);
+            s.WellbeingHistory = allReports.Where(r => !r.IsCurrent).ToList();
+            s.Reports = allReports; // For backward compatibility
+
             return s;
         }
+
 
         public Student GetStudentByUsername(string username)
         {

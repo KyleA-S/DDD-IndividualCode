@@ -15,8 +15,23 @@ namespace DDD.Services
             _repository = repository;
         }
 
+        // ------------------------------
+        // MAIN SUBMIT REPORT (MERGED)
+        // ------------------------------
         public void SubmitReport(Student student, int score, string notes)
         {
+            // Move the existing current report into history
+            if (student.CurrentWellbeing != null)
+            {
+                student.CurrentWellbeing.IsCurrent = false;
+
+                if (student.WellbeingHistory == null)
+                    student.WellbeingHistory = new List<WellbeingReport>();
+
+                student.WellbeingHistory.Add(student.CurrentWellbeing);
+            }
+
+            // Create new current report
             var report = new WellbeingReport
             {
                 Id = GenerateReportId(),
@@ -24,20 +39,28 @@ namespace DDD.Services
                 Score = score,
                 Notes = notes ?? string.Empty,
                 Date = DateTime.UtcNow,
-                IsHighPriority = score < 5
+                IsHighPriority = score < 5,
+                IsCurrent = true
             };
 
-            if (student.Reports == null) student.Reports = new List<WellbeingReport>();
+            // Set current report reference
+            student.CurrentWellbeing = report;
+
+            // Add to Reports list (backwards compatibility)
+            if (student.Reports == null)
+                student.Reports = new List<WellbeingReport>();
+
             student.Reports.Add(report);
 
-            // Update student's last report date
+            // Reset missed-report status
             student.LastWellbeingReportDate = DateTime.UtcNow;
             student.HasMissedWellbeingReport = false;
             student.MissedReportCount = 0;
 
+            // Save changes
             _repository.SaveStudent(student);
 
-            // Create alert for low score
+            // Generate wellbeing alert
             if (score < 5)
             {
                 var alert = new WellbeingAlert
@@ -48,15 +71,59 @@ namespace DDD.Services
                     Reason = "low_score",
                     IsResolved = false
                 };
+
                 _repository.AddWellbeingAlert(alert);
             }
         }
 
+        // ------------------------------
+        //   CURRENT REPORT
+        // ------------------------------
+        public WellbeingReport GetCurrentWellbeing(Student student)
+        {
+            return student.CurrentWellbeing;
+        }
+
+        // ------------------------------
+        //   HISTORY REPORTS (OLD ONES)
+        // ------------------------------
+        public List<WellbeingReport> GetWellbeingHistory(Student student)
+        {
+            if (student.WellbeingHistory == null)
+                return new List<WellbeingReport>();
+
+            return student.WellbeingHistory
+                .OrderByDescending(r => r.Date)
+                .ToList();
+        }
+
+        // ------------------------------
+        //   ALL REPORTS (CURRENT + HISTORY)
+        // ------------------------------
+        public List<WellbeingReport> GetAllWellbeingReports(Student student)
+        {
+            var all = new List<WellbeingReport>();
+
+            if (student.CurrentWellbeing != null)
+                all.Add(student.CurrentWellbeing);
+
+            if (student.WellbeingHistory != null)
+                all.AddRange(student.WellbeingHistory);
+
+            return all.OrderByDescending(r => r.Date).ToList();
+        }
+
+        // ------------------------------
+        // EXISTING "GetReports" (BACKWARD COMPATIBILITY)
+        // ------------------------------
         public List<WellbeingReport> GetReports(Student student)
         {
             return student.Reports ?? new List<WellbeingReport>();
         }
 
+        // ------------------------------
+        // MISSED REPORT CHECKING
+        // ------------------------------
         public void CheckAndUpdateMissedReports()
         {
             var allStudents = _repository.GetAllStudents();
@@ -64,22 +131,16 @@ namespace DDD.Services
 
             foreach (var student in allStudents)
             {
-                // Calculate next Monday at 12:00 PM
                 var nextMonday = GetNextMondayNoon(DateTime.UtcNow);
+                var lastReport = student.LastWellbeingReportDate;
 
-                // Check if student has submitted this week
-                var lastReportDate = student.LastWellbeingReportDate;
-                var daysSinceLastReport = (now - lastReportDate).TotalDays;
-
-                // If it's past Monday noon and no report submitted this week
-                if (now > nextMonday && (now - lastReportDate).TotalDays >= 7)
+                if (now > nextMonday && (now - lastReport).TotalDays >= 7)
                 {
                     if (!student.HasMissedWellbeingReport)
                     {
                         student.HasMissedWellbeingReport = true;
                         student.MissedReportCount++;
 
-                        // Create alert for missed report
                         var alert = new WellbeingAlert
                         {
                             StudentId = student.Id,
@@ -88,6 +149,7 @@ namespace DDD.Services
                             Reason = "missed_report",
                             IsResolved = false
                         };
+
                         _repository.AddWellbeingAlert(alert);
                     }
                 }
@@ -100,35 +162,38 @@ namespace DDD.Services
             }
         }
 
+        // ------------------------------
+        // REPORT DEADLINE STATUS
+        // ------------------------------
         public (TimeSpan timeUntil, bool isOverdue, int daysOverdue) GetWellbeingReportStatus(Student student)
         {
             var now = DateTime.UtcNow;
-            var nextMondayNoon = GetNextMondayNoon(now);
-            var timeUntil = nextMondayNoon - now;
+            var nextMonday = GetNextMondayNoon(now);
+            var diff = nextMonday - now;
 
-            if (timeUntil.TotalSeconds < 0)
+            if (diff.TotalSeconds < 0)
             {
-                // Overdue
-                var daysOverdue = (int)Math.Ceiling(Math.Abs(timeUntil.TotalDays));
-                return (TimeSpan.Zero, true, daysOverdue);
+                var overdue = (int)Math.Ceiling(Math.Abs(diff.TotalDays));
+                return (TimeSpan.Zero, true, overdue);
             }
 
-            return (timeUntil, false, 0);
+            return (diff, false, 0);
         }
 
+        // Monday 12 PM deadline
         public DateTime GetNextMondayNoon(DateTime fromDate)
         {
-            // Get the next Monday
-            var nextMonday = fromDate;
-            while (nextMonday.DayOfWeek != DayOfWeek.Monday)
-            {
-                nextMonday = nextMonday.AddDays(1);
-            }
+            var next = fromDate;
 
-            // Set to 12:00 PM
-            return new DateTime(nextMonday.Year, nextMonday.Month, nextMonday.Day, 12, 0, 0);
+            while (next.DayOfWeek != DayOfWeek.Monday)
+                next = next.AddDays(1);
+
+            return new DateTime(next.Year, next.Month, next.Day, 12, 0, 0);
         }
 
+        // ------------------------------
+        // ALERTS
+        // ------------------------------
         public List<WellbeingAlert> GetActiveAlerts()
         {
             return _repository.GetActiveWellbeingAlerts();
@@ -139,9 +204,38 @@ namespace DDD.Services
             _repository.ResolveAlert(alertId);
         }
 
+        // ------------------------------
+        // HIGH PRIORITY STUDENTS
+        // ------------------------------
         public List<Student> GetHighPriorityStudents()
         {
             return _repository.GetStudentsWithLowWellbeing();
+        }
+
+        // Supervisor-specific high priority logic (from NEW VERSION)
+        public List<Student> GetHighPrioritySupervisees(PersonalSupervisor ps, PersonalSupervisorService psService)
+        {
+            var supervisees = psService.GetSupervisees(ps);
+            var highPriority = new List<Student>();
+
+            foreach (var student in supervisees)
+            {
+                if (student.CurrentWellbeing != null && student.CurrentWellbeing.Score < 5)
+                {
+                    highPriority.Add(student);
+                }
+                else if (student.HasMissedWellbeingReport)
+                {
+                    highPriority.Add(student);
+                }
+                else if (student.WellbeingHistory != null &&
+                        student.WellbeingHistory.Any(r => r.Score < 5 && (DateTime.UtcNow - r.Date).TotalDays <= 30))
+                {
+                    highPriority.Add(student);
+                }
+            }
+
+            return highPriority.OrderBy(s => s.Name).ToList();
         }
 
         public List<Student> GetStudentsWithMissedReports()
@@ -149,14 +243,22 @@ namespace DDD.Services
             return _repository.GetStudentsWithMissedReports();
         }
 
+        // ------------------------------
+        // ID GENERATION
+        // ------------------------------
         private int GenerateReportId()
         {
             var allReports = new List<WellbeingReport>();
+
             foreach (var s in _repository.GetAllStudents())
             {
-                if (s.Reports != null) allReports.AddRange(s.Reports);
+                if (s.Reports != null)
+                    allReports.AddRange(s.Reports);
             }
-            return allReports.Count > 0 ? allReports.Max(r => r.Id) + 1 : 1;
+
+            return allReports.Count > 0
+                ? allReports.Max(r => r.Id) + 1
+                : 1;
         }
     }
 }

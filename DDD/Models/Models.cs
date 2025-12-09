@@ -30,8 +30,9 @@ namespace DDD.Models
         public DateTime LastWellbeingReportDate { get; set; }
         public bool HasMissedWellbeingReport { get; set; } = false;
         public int MissedReportCount { get; set; } = 0;
-
+        public WellbeingReport CurrentWellbeing { get; set; }
         public List<Meeting> Meetings { get; set; } = new List<Meeting>();
+        public List<WellbeingReport> WellbeingHistory { get; set; } = new List<WellbeingReport>();
         public List<WellbeingReport> Reports { get; set; } = new List<WellbeingReport>();
     }
 
@@ -65,6 +66,7 @@ namespace DDD.Models
         public string Notes { get; set; } = string.Empty;
         public DateTime Date { get; set; }
         public bool IsHighPriority { get; set; } = false;
+        public bool IsCurrent { get; set; } = false;
     }
 
     public class Message
@@ -88,4 +90,6 @@ namespace DDD.Models
         public bool IsResolved { get; set; } = false;
         public DateTime? ResolvedDate { get; set; }
     }
+
+
 }
