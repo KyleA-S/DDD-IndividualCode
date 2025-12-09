@@ -405,18 +405,30 @@ namespace DDD.Data
         public List<Student> GetAllStudents()
         {
             var list = new List<Student>();
+
             using var cmd = _conn.CreateCommand();
             cmd.CommandText = "SELECT * FROM Users WHERE Role='Student' ORDER BY Id;";
             using var rdr = cmd.ExecuteReader();
+
             while (rdr.Read())
             {
                 var s = MapStudent(rdr);
+
+                // FIX: load meetings
                 s.Meetings = LoadMeetingsForStudent(s.Id);
-                s.Reports = LoadReportsForStudent(s.Id);
+
+                // FIX: load reports
+                var reports = LoadReportsForStudent(s.Id);
+                s.CurrentWellbeing = reports.FirstOrDefault(r => r.IsCurrent);
+                s.WellbeingHistory = reports.Where(r => !r.IsCurrent).ToList();
+                s.Reports = reports;
+
                 list.Add(s);
             }
+
             return list;
         }
+
 
         // New method: Get students with low wellbeing scores (<5)
         public List<Student> GetStudentsWithLowWellbeing()
