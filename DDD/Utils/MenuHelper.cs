@@ -14,8 +14,10 @@ namespace DDD.Utils
             int choice;
             do
             {
+                Console.ForegroundColor
+            = ConsoleColor.White;
                 Console.Clear();
-                Console.WriteLine($"--- Student Menu ({student.Name}) ---");
+                Console.WriteLine($"--- Student Menu ({student.Name}) ---", Console.ForegroundColor);
                 Console.WriteLine("1. Submit Wellbeing Report");
                 Console.WriteLine("2. View My Reports");
                 Console.WriteLine("3. Book Meeting with Personal Supervisor");
