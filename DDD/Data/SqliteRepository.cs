@@ -36,7 +36,12 @@ namespace DDD.Data
                     StudentCode TEXT,
                     SupervisorCode TEXT,
                     SeniorTutorCode TEXT,
-                    YearGroup INTEGER
+                    YearGroup INTEGER,
+                    SecurityQuestion TEXT DEFAULT '',
+                    SecurityAnswer TEXT DEFAULT '',
+                    LastWellbeingReportDate TEXT,
+                    HasMissedWellbeingReport INTEGER DEFAULT 0,
+                    MissedReportCount INTEGER DEFAULT 0
                 );
 
                 CREATE TABLE IF NOT EXISTS Meetings (
@@ -54,6 +59,7 @@ namespace DDD.Data
                     Score INTEGER NOT NULL,
                     Notes TEXT,
                     Date TEXT NOT NULL,
+                    IsHighPriority INTEGER DEFAULT 0,
                     FOREIGN KEY(StudentId) REFERENCES Users(Id) ON DELETE CASCADE
                 );
 
@@ -67,6 +73,17 @@ namespace DDD.Data
                     IsRead INTEGER NOT NULL DEFAULT 0,
                     FOREIGN KEY(StudentId) REFERENCES Users(Id) ON DELETE CASCADE,
                     FOREIGN KEY(PersonalSupervisorId) REFERENCES Users(Id) ON DELETE CASCADE
+                );
+
+                CREATE TABLE IF NOT EXISTS WellbeingAlerts (
+                    Id INTEGER PRIMARY KEY,
+                    StudentId INTEGER NOT NULL,
+                    StudentName TEXT NOT NULL,
+                    AlertDate TEXT NOT NULL,
+                    Reason TEXT NOT NULL,
+                    IsResolved INTEGER DEFAULT 0,
+                    ResolvedDate TEXT,
+                    FOREIGN KEY(StudentId) REFERENCES Users(Id) ON DELETE CASCADE
                 );
             ";
             cmd.ExecuteNonQuery();
@@ -84,40 +101,73 @@ namespace DDD.Data
         #region Mappers & Loaders
         private static Student MapStudent(IDataRecord r)
         {
-            return new Student
+            var student = new Student
             {
                 Id = Convert.ToInt32(r["Id"]),
                 Username = r["Username"].ToString(),
                 Name = r["Name"].ToString(),
                 Password = r["Password"].ToString(),
                 PersonalSupervisorId = r["PersonalSupervisorId"] == DBNull.Value ? 0 : Convert.ToInt32(r["PersonalSupervisorId"]),
-                StudentCode = HasColumn(r, "StudentCode") && r["StudentCode"] != DBNull.Value ? r["StudentCode"].ToString() : string.Empty,
                 YearGroup = HasColumn(r, "YearGroup") && r["YearGroup"] != DBNull.Value ? Convert.ToInt32(r["YearGroup"]) : 1
             };
+
+            // Handle nullable string columns
+            student.StudentCode = HasColumn(r, "StudentCode") && r["StudentCode"] != DBNull.Value ? r["StudentCode"].ToString() : string.Empty;
+            student.SecurityQuestion = HasColumn(r, "SecurityQuestion") && r["SecurityQuestion"] != DBNull.Value ? r["SecurityQuestion"].ToString() : string.Empty;
+            student.SecurityAnswer = HasColumn(r, "SecurityAnswer") && r["SecurityAnswer"] != DBNull.Value ? r["SecurityAnswer"].ToString() : string.Empty;
+
+            // Handle wellbeing tracking fields
+            if (HasColumn(r, "LastWellbeingReportDate") && r["LastWellbeingReportDate"] != DBNull.Value)
+            {
+                student.LastWellbeingReportDate = DateTime.Parse(r["LastWellbeingReportDate"].ToString());
+            }
+            else
+            {
+                student.LastWellbeingReportDate = DateTime.MinValue;
+            }
+
+            student.HasMissedWellbeingReport = HasColumn(r, "HasMissedWellbeingReport") && r["HasMissedWellbeingReport"] != DBNull.Value ?
+                Convert.ToInt32(r["HasMissedWellbeingReport"]) != 0 : false;
+            student.MissedReportCount = HasColumn(r, "MissedReportCount") && r["MissedReportCount"] != DBNull.Value ?
+                Convert.ToInt32(r["MissedReportCount"]) : 0;
+
+            return student;
         }
 
         private static PersonalSupervisor MapSupervisor(IDataRecord r)
         {
-            return new PersonalSupervisor
+            var supervisor = new PersonalSupervisor
             {
                 Id = Convert.ToInt32(r["Id"]),
                 Username = r["Username"].ToString(),
                 Name = r["Name"].ToString(),
-                Password = r["Password"].ToString(),
-                SupervisorCode = HasColumn(r, "SupervisorCode") && r["SupervisorCode"] != DBNull.Value ? r["SupervisorCode"].ToString() : string.Empty
+                Password = r["Password"].ToString()
             };
+
+            // Handle nullable string columns
+            supervisor.SupervisorCode = HasColumn(r, "SupervisorCode") && r["SupervisorCode"] != DBNull.Value ? r["SupervisorCode"].ToString() : string.Empty;
+            supervisor.SecurityQuestion = HasColumn(r, "SecurityQuestion") && r["SecurityQuestion"] != DBNull.Value ? r["SecurityQuestion"].ToString() : string.Empty;
+            supervisor.SecurityAnswer = HasColumn(r, "SecurityAnswer") && r["SecurityAnswer"] != DBNull.Value ? r["SecurityAnswer"].ToString() : string.Empty;
+
+            return supervisor;
         }
 
         private static SeniorTutor MapSenior(IDataRecord r)
         {
-            return new SeniorTutor
+            var tutor = new SeniorTutor
             {
                 Id = Convert.ToInt32(r["Id"]),
                 Username = r["Username"].ToString(),
                 Name = r["Name"].ToString(),
-                Password = r["Password"].ToString(),
-                SeniorTutorCode = HasColumn(r, "SeniorTutorCode") && r["SeniorTutorCode"] != DBNull.Value ? r["SeniorTutorCode"].ToString() : string.Empty
+                Password = r["Password"].ToString()
             };
+
+            // Handle nullable string columns
+            tutor.SeniorTutorCode = HasColumn(r, "SeniorTutorCode") && r["SeniorTutorCode"] != DBNull.Value ? r["SeniorTutorCode"].ToString() : string.Empty;
+            tutor.SecurityQuestion = HasColumn(r, "SecurityQuestion") && r["SecurityQuestion"] != DBNull.Value ? r["SecurityQuestion"].ToString() : string.Empty;
+            tutor.SecurityAnswer = HasColumn(r, "SecurityAnswer") && r["SecurityAnswer"] != DBNull.Value ? r["SecurityAnswer"].ToString() : string.Empty;
+
+            return tutor;
         }
 
         private List<Meeting> LoadMeetingsForStudent(int studentId)
@@ -164,7 +214,7 @@ namespace DDD.Data
         {
             var list = new List<WellbeingReport>();
             using var cmd = _conn.CreateCommand();
-            cmd.CommandText = @"SELECT Id, StudentId, Score, Notes, Date FROM Reports WHERE StudentId = @sid ORDER BY Date;";
+            cmd.CommandText = @"SELECT Id, StudentId, Score, Notes, Date, IsHighPriority FROM Reports WHERE StudentId = @sid ORDER BY Date;";
             cmd.Parameters.AddWithValue("@sid", studentId);
             using var rdr = cmd.ExecuteReader();
             while (rdr.Read())
@@ -175,7 +225,31 @@ namespace DDD.Data
                     StudentId = Convert.ToInt32(rdr["StudentId"]),
                     Score = Convert.ToInt32(rdr["Score"]),
                     Notes = rdr["Notes"] == DBNull.Value ? string.Empty : rdr["Notes"].ToString(),
-                    Date = DateTime.Parse(rdr["Date"].ToString())
+                    Date = DateTime.Parse(rdr["Date"].ToString()),
+                    IsHighPriority = Convert.ToInt32(rdr["IsHighPriority"]) != 0
+                });
+            }
+            return list;
+        }
+
+        private List<WellbeingAlert> LoadAlertsForStudent(int studentId)
+        {
+            var list = new List<WellbeingAlert>();
+            using var cmd = _conn.CreateCommand();
+            cmd.CommandText = @"SELECT Id, StudentId, StudentName, AlertDate, Reason, IsResolved, ResolvedDate FROM WellbeingAlerts WHERE StudentId = @sid ORDER BY AlertDate DESC;";
+            cmd.Parameters.AddWithValue("@sid", studentId);
+            using var rdr = cmd.ExecuteReader();
+            while (rdr.Read())
+            {
+                list.Add(new WellbeingAlert
+                {
+                    Id = Convert.ToInt32(rdr["Id"]),
+                    StudentId = Convert.ToInt32(rdr["StudentId"]),
+                    StudentName = rdr["StudentName"].ToString(),
+                    AlertDate = DateTime.Parse(rdr["AlertDate"].ToString()),
+                    Reason = rdr["Reason"].ToString(),
+                    IsResolved = Convert.ToInt32(rdr["IsResolved"]) != 0,
+                    ResolvedDate = rdr["ResolvedDate"] == DBNull.Value ? null : (DateTime?)DateTime.Parse(rdr["ResolvedDate"].ToString())
                 });
             }
             return list;
@@ -229,8 +303,8 @@ namespace DDD.Data
             if (student.Id <= 0)
             {
                 using var cmd = _conn.CreateCommand();
-                cmd.CommandText = @"INSERT INTO Users (Username, Name, Password, Role, PersonalSupervisorId, StudentCode, YearGroup)
-                                    VALUES (@u,@n,@p,'Student', @ps, @scode, @yg);
+                cmd.CommandText = @"INSERT INTO Users (Username, Name, Password, Role, PersonalSupervisorId, StudentCode, YearGroup, SecurityQuestion, SecurityAnswer, LastWellbeingReportDate, HasMissedWellbeingReport, MissedReportCount)
+                                    VALUES (@u,@n,@p,'Student', @ps, @scode, @yg, @sq, @sa, @lwrd, @hmwr, @mrc);
                                     SELECT last_insert_rowid();";
                 cmd.Parameters.AddWithValue("@u", student.Username ?? "");
                 cmd.Parameters.AddWithValue("@n", student.Name ?? "");
@@ -239,13 +313,18 @@ namespace DDD.Data
                 else cmd.Parameters.AddWithValue("@ps", student.PersonalSupervisorId);
                 cmd.Parameters.AddWithValue("@scode", string.IsNullOrEmpty(student.StudentCode) ? DBNull.Value : (object)student.StudentCode);
                 cmd.Parameters.AddWithValue("@yg", student.YearGroup);
+                cmd.Parameters.AddWithValue("@sq", student.SecurityQuestion ?? "");
+                cmd.Parameters.AddWithValue("@sa", student.SecurityAnswer ?? "");
+                cmd.Parameters.AddWithValue("@lwrd", student.LastWellbeingReportDate == DateTime.MinValue ? DBNull.Value : (object)student.LastWellbeingReportDate.ToString("o"));
+                cmd.Parameters.AddWithValue("@hmwr", student.HasMissedWellbeingReport ? 1 : 0);
+                cmd.Parameters.AddWithValue("@mrc", student.MissedReportCount);
                 var id = (long)cmd.ExecuteScalar();
                 student.Id = (int)id;
             }
             else
             {
                 using var cmd = _conn.CreateCommand();
-                cmd.CommandText = @"UPDATE Users SET Username=@u, Name=@n, Password=@p, PersonalSupervisorId=@ps, StudentCode=@scode, YearGroup=@yg WHERE Id=@id;";
+                cmd.CommandText = @"UPDATE Users SET Username=@u, Name=@n, Password=@p, PersonalSupervisorId=@ps, StudentCode=@scode, YearGroup=@yg, SecurityQuestion=@sq, SecurityAnswer=@sa, LastWellbeingReportDate=@lwrd, HasMissedWellbeingReport=@hmwr, MissedReportCount=@mrc WHERE Id=@id;";
                 cmd.Parameters.AddWithValue("@u", student.Username ?? "");
                 cmd.Parameters.AddWithValue("@n", student.Name ?? "");
                 cmd.Parameters.AddWithValue("@p", student.Password ?? "");
@@ -253,6 +332,11 @@ namespace DDD.Data
                 else cmd.Parameters.AddWithValue("@ps", student.PersonalSupervisorId);
                 cmd.Parameters.AddWithValue("@scode", string.IsNullOrEmpty(student.StudentCode) ? DBNull.Value : (object)student.StudentCode);
                 cmd.Parameters.AddWithValue("@yg", student.YearGroup);
+                cmd.Parameters.AddWithValue("@sq", student.SecurityQuestion ?? "");
+                cmd.Parameters.AddWithValue("@sa", student.SecurityAnswer ?? "");
+                cmd.Parameters.AddWithValue("@lwrd", student.LastWellbeingReportDate == DateTime.MinValue ? DBNull.Value : (object)student.LastWellbeingReportDate.ToString("o"));
+                cmd.Parameters.AddWithValue("@hmwr", student.HasMissedWellbeingReport ? 1 : 0);
+                cmd.Parameters.AddWithValue("@mrc", student.MissedReportCount);
                 cmd.Parameters.AddWithValue("@id", student.Id);
                 cmd.ExecuteNonQuery();
             }
@@ -291,11 +375,12 @@ namespace DDD.Data
                 {
                     using var ir = _conn.CreateCommand();
                     ir.Transaction = tx;
-                    ir.CommandText = "INSERT INTO Reports (StudentId, Score, Notes, Date) VALUES (@sid,@score,@notes,@date);";
+                    ir.CommandText = "INSERT INTO Reports (StudentId, Score, Notes, Date, IsHighPriority) VALUES (@sid,@score,@notes,@date,@high);";
                     ir.Parameters.AddWithValue("@sid", student.Id);
                     ir.Parameters.AddWithValue("@score", r.Score);
                     ir.Parameters.AddWithValue("@notes", r.Notes ?? "");
                     ir.Parameters.AddWithValue("@date", r.Date.ToString("o"));
+                    ir.Parameters.AddWithValue("@high", r.IsHighPriority ? 1 : 0);
                     ir.ExecuteNonQuery();
                 }
             }
@@ -308,6 +393,47 @@ namespace DDD.Data
             var list = new List<Student>();
             using var cmd = _conn.CreateCommand();
             cmd.CommandText = "SELECT * FROM Users WHERE Role='Student' ORDER BY Id;";
+            using var rdr = cmd.ExecuteReader();
+            while (rdr.Read())
+            {
+                var s = MapStudent(rdr);
+                s.Meetings = LoadMeetingsForStudent(s.Id);
+                s.Reports = LoadReportsForStudent(s.Id);
+                list.Add(s);
+            }
+            return list;
+        }
+
+        // New method: Get students with low wellbeing scores (<5)
+        public List<Student> GetStudentsWithLowWellbeing()
+        {
+            var list = new List<Student>();
+            using var cmd = _conn.CreateCommand();
+            cmd.CommandText = @"
+                SELECT DISTINCT u.* FROM Users u
+                JOIN Reports r ON u.Id = r.StudentId
+                WHERE u.Role = 'Student' AND r.Score < 5
+                ORDER BY u.Id;";
+            using var rdr = cmd.ExecuteReader();
+            while (rdr.Read())
+            {
+                var s = MapStudent(rdr);
+                s.Meetings = LoadMeetingsForStudent(s.Id);
+                s.Reports = LoadReportsForStudent(s.Id);
+                list.Add(s);
+            }
+            return list;
+        }
+
+        // New method: Get students who have missed wellbeing reports
+        public List<Student> GetStudentsWithMissedReports()
+        {
+            var list = new List<Student>();
+            using var cmd = _conn.CreateCommand();
+            cmd.CommandText = @"
+                SELECT * FROM Users 
+                WHERE Role = 'Student' AND HasMissedWellbeingReport = 1
+                ORDER BY Id;";
             using var rdr = cmd.ExecuteReader();
             while (rdr.Read())
             {
@@ -363,24 +489,28 @@ namespace DDD.Data
             if (supervisor.Id <= 0)
             {
                 using var cmd = _conn.CreateCommand();
-                cmd.CommandText = @"INSERT INTO Users (Username, Name, Password, Role, SupervisorCode)
-                                    VALUES (@u,@n,@p,'PersonalSupervisor', @scode);
+                cmd.CommandText = @"INSERT INTO Users (Username, Name, Password, Role, SupervisorCode, SecurityQuestion, SecurityAnswer)
+                                    VALUES (@u,@n,@p,'PersonalSupervisor', @scode, @sq, @sa);
                                     SELECT last_insert_rowid();";
                 cmd.Parameters.AddWithValue("@u", supervisor.Username ?? "");
                 cmd.Parameters.AddWithValue("@n", supervisor.Name ?? "");
                 cmd.Parameters.AddWithValue("@p", supervisor.Password ?? "");
                 cmd.Parameters.AddWithValue("@scode", string.IsNullOrEmpty(supervisor.SupervisorCode) ? DBNull.Value : (object)supervisor.SupervisorCode);
+                cmd.Parameters.AddWithValue("@sq", supervisor.SecurityQuestion ?? "");
+                cmd.Parameters.AddWithValue("@sa", supervisor.SecurityAnswer ?? "");
                 var id = (long)cmd.ExecuteScalar();
                 supervisor.Id = (int)id;
             }
             else
             {
                 using var cmd = _conn.CreateCommand();
-                cmd.CommandText = "UPDATE Users SET Username=@u, Name=@n, Password=@p, SupervisorCode=@scode WHERE Id=@id;";
+                cmd.CommandText = "UPDATE Users SET Username=@u, Name=@n, Password=@p, SupervisorCode=@scode, SecurityQuestion=@sq, SecurityAnswer=@sa WHERE Id=@id;";
                 cmd.Parameters.AddWithValue("@u", supervisor.Username ?? "");
                 cmd.Parameters.AddWithValue("@n", supervisor.Name ?? "");
                 cmd.Parameters.AddWithValue("@p", supervisor.Password ?? "");
                 cmd.Parameters.AddWithValue("@scode", string.IsNullOrEmpty(supervisor.SupervisorCode) ? DBNull.Value : (object)supervisor.SupervisorCode);
+                cmd.Parameters.AddWithValue("@sq", supervisor.SecurityQuestion ?? "");
+                cmd.Parameters.AddWithValue("@sa", supervisor.SecurityAnswer ?? "");
                 cmd.Parameters.AddWithValue("@id", supervisor.Id);
                 cmd.ExecuteNonQuery();
             }
@@ -461,22 +591,26 @@ namespace DDD.Data
             if (seniorTutor.Id <= 0)
             {
                 using var cmd = _conn.CreateCommand();
-                cmd.CommandText = "INSERT INTO Users (Username, Name, Password, Role, SeniorTutorCode) VALUES (@u,@n,@p,'SeniorTutor', @scode); SELECT last_insert_rowid();";
+                cmd.CommandText = "INSERT INTO Users (Username, Name, Password, Role, SeniorTutorCode, SecurityQuestion, SecurityAnswer) VALUES (@u,@n,@p,'SeniorTutor', @scode, @sq, @sa); SELECT last_insert_rowid();";
                 cmd.Parameters.AddWithValue("@u", seniorTutor.Username ?? "");
                 cmd.Parameters.AddWithValue("@n", seniorTutor.Name ?? "");
                 cmd.Parameters.AddWithValue("@p", seniorTutor.Password ?? "");
                 cmd.Parameters.AddWithValue("@scode", string.IsNullOrEmpty(seniorTutor.SeniorTutorCode) ? DBNull.Value : (object)seniorTutor.SeniorTutorCode);
+                cmd.Parameters.AddWithValue("@sq", seniorTutor.SecurityQuestion ?? "");
+                cmd.Parameters.AddWithValue("@sa", seniorTutor.SecurityAnswer ?? "");
                 var id = (long)cmd.ExecuteScalar();
                 seniorTutor.Id = (int)id;
             }
             else
             {
                 using var cmd = _conn.CreateCommand();
-                cmd.CommandText = "UPDATE Users SET Username=@u, Name=@n, Password=@p, SeniorTutorCode=@scode WHERE Id=@id;";
+                cmd.CommandText = "UPDATE Users SET Username=@u, Name=@n, Password=@p, SeniorTutorCode=@scode, SecurityQuestion=@sq, SecurityAnswer=@sa WHERE Id=@id;";
                 cmd.Parameters.AddWithValue("@u", seniorTutor.Username ?? "");
                 cmd.Parameters.AddWithValue("@n", seniorTutor.Name ?? "");
                 cmd.Parameters.AddWithValue("@p", seniorTutor.Password ?? "");
                 cmd.Parameters.AddWithValue("@scode", string.IsNullOrEmpty(seniorTutor.SeniorTutorCode) ? DBNull.Value : (object)seniorTutor.SeniorTutorCode);
+                cmd.Parameters.AddWithValue("@sq", seniorTutor.SecurityQuestion ?? "");
+                cmd.Parameters.AddWithValue("@sa", seniorTutor.SecurityAnswer ?? "");
                 cmd.Parameters.AddWithValue("@id", seniorTutor.Id);
                 cmd.ExecuteNonQuery();
             }
@@ -658,6 +792,120 @@ namespace DDD.Data
                 });
             }
             return list;
+        }
+        #endregion
+
+        #region Wellbeing Alerts CRUD
+        public void AddWellbeingAlert(WellbeingAlert alert)
+        {
+            using var cmd = _conn.CreateCommand();
+            cmd.CommandText = @"
+                INSERT INTO WellbeingAlerts (StudentId, StudentName, AlertDate, Reason, IsResolved, ResolvedDate)
+                VALUES (@sid, @sname, @adate, @reason, @resolved, @rdate);
+                SELECT last_insert_rowid();
+            ";
+            cmd.Parameters.AddWithValue("@sid", alert.StudentId);
+            cmd.Parameters.AddWithValue("@sname", alert.StudentName ?? "");
+            cmd.Parameters.AddWithValue("@adate", alert.AlertDate.ToString("o"));
+            cmd.Parameters.AddWithValue("@reason", alert.Reason ?? "");
+            cmd.Parameters.AddWithValue("@resolved", alert.IsResolved ? 1 : 0);
+            cmd.Parameters.AddWithValue("@rdate",
+    alert.ResolvedDate.HasValue
+        ? alert.ResolvedDate.Value.ToString("o")
+        : (object)DBNull.Value);
+
+            var id = (long)cmd.ExecuteScalar();
+            alert.Id = (int)id;
+        }
+
+        public List<WellbeingAlert> GetActiveWellbeingAlerts()
+        {
+            var list = new List<WellbeingAlert>();
+            using var cmd = _conn.CreateCommand();
+            cmd.CommandText = @"SELECT Id, StudentId, StudentName, AlertDate, Reason, IsResolved, ResolvedDate 
+                                FROM WellbeingAlerts 
+                                WHERE IsResolved = 0
+                                ORDER BY AlertDate DESC;";
+            using var rdr = cmd.ExecuteReader();
+            while (rdr.Read())
+            {
+                list.Add(new WellbeingAlert
+                {
+                    Id = Convert.ToInt32(rdr["Id"]),
+                    StudentId = Convert.ToInt32(rdr["StudentId"]),
+                    StudentName = rdr["StudentName"].ToString(),
+                    AlertDate = DateTime.Parse(rdr["AlertDate"].ToString()),
+                    Reason = rdr["Reason"].ToString(),
+                    IsResolved = Convert.ToInt32(rdr["IsResolved"]) != 0,
+                    ResolvedDate = rdr["ResolvedDate"] == DBNull.Value ? null : (DateTime?)DateTime.Parse(rdr["ResolvedDate"].ToString())
+                });
+            }
+            return list;
+        }
+
+        public void ResolveAlert(int alertId)
+        {
+            using var cmd = _conn.CreateCommand();
+            cmd.CommandText = @"UPDATE WellbeingAlerts SET IsResolved = 1, ResolvedDate = @now WHERE Id = @id;";
+            cmd.Parameters.AddWithValue("@id", alertId);
+            cmd.Parameters.AddWithValue("@now", DateTime.UtcNow.ToString("o"));
+            cmd.ExecuteNonQuery();
+        }
+        #endregion
+
+        #region Password Reset Methods
+        public bool UpdatePassword(string username, string newPassword)
+        {
+            using var cmd = _conn.CreateCommand();
+            cmd.CommandText = "UPDATE Users SET Password = @pass WHERE Username = @user;";
+            cmd.Parameters.AddWithValue("@pass", newPassword ?? "");
+            cmd.Parameters.AddWithValue("@user", username);
+            int rows = cmd.ExecuteNonQuery();
+            return rows > 0;
+        }
+
+        public bool SetSecurityQuestion(string username, string question, string answer)
+        {
+            using var cmd = _conn.CreateCommand();
+            cmd.CommandText = "UPDATE Users SET SecurityQuestion = @q, SecurityAnswer = @a WHERE Username = @user;";
+            cmd.Parameters.AddWithValue("@q", question ?? "");
+            cmd.Parameters.AddWithValue("@a", answer ?? "");
+            cmd.Parameters.AddWithValue("@user", username);
+            int rows = cmd.ExecuteNonQuery();
+            return rows > 0;
+        }
+
+        public bool VerifySecurityAnswer(string username, string answer)
+        {
+            using var cmd = _conn.CreateCommand();
+            cmd.CommandText = "SELECT SecurityAnswer FROM Users WHERE Username = @user;";
+            cmd.Parameters.AddWithValue("@user", username);
+            var result = cmd.ExecuteScalar();
+
+            // Handle DBNull properly
+            if (result == null || result == DBNull.Value)
+                return false;
+
+            var storedAnswer = result.ToString();
+            if (string.IsNullOrEmpty(storedAnswer))
+                return false;
+
+            return string.Equals(storedAnswer, answer, StringComparison.OrdinalIgnoreCase);
+        }
+
+        public string GetSecurityQuestion(string username)
+        {
+            using var cmd = _conn.CreateCommand();
+            cmd.CommandText = "SELECT SecurityQuestion FROM Users WHERE Username = @user;";
+            cmd.Parameters.AddWithValue("@user", username);
+            var result = cmd.ExecuteScalar();
+
+            // Handle DBNull properly
+            if (result == null || result == DBNull.Value)
+                return string.Empty;
+
+            var question = result.ToString();
+            return question ?? string.Empty;
         }
         #endregion
 

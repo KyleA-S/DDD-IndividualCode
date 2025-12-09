@@ -17,7 +17,7 @@ namespace DDD.Services
         }
 
         // Create new student with yearGroup (1..4)
-        public Student CreateStudent(string username, string name, string password, int yearGroup)
+        public Student CreateStudent(string username, string name, string password, int yearGroup, string securityQuestion = "", string securityAnswer = "")
         {
             if (yearGroup < 1 || yearGroup > 4) throw new ArgumentException("Year group must be 1..4");
 
@@ -26,7 +26,9 @@ namespace DDD.Services
                 Username = username,
                 Name = name,
                 Password = password,
-                YearGroup = yearGroup
+                YearGroup = yearGroup,
+                SecurityQuestion = securityQuestion,
+                SecurityAnswer = securityAnswer
             };
 
             // generate unique StudentCode
@@ -37,13 +39,15 @@ namespace DDD.Services
         }
 
         // Create personal supervisor with unique code
-        public PersonalSupervisor CreatePersonalSupervisor(string username, string name, string password)
+        public PersonalSupervisor CreatePersonalSupervisor(string username, string name, string password, string securityQuestion = "", string securityAnswer = "")
         {
             var ps = new PersonalSupervisor
             {
                 Username = username,
                 Name = name,
-                Password = password
+                Password = password,
+                SecurityQuestion = securityQuestion,
+                SecurityAnswer = securityAnswer
             };
 
             ps.SupervisorCode = GenerateUniqueSupervisorCode();
@@ -52,13 +56,15 @@ namespace DDD.Services
         }
 
         // Create senior tutor with unique code
-        public SeniorTutor CreateSeniorTutor(string username, string name, string password)
+        public SeniorTutor CreateSeniorTutor(string username, string name, string password, string securityQuestion = "", string securityAnswer = "")
         {
             var st = new SeniorTutor
             {
                 Username = username,
                 Name = name,
-                Password = password
+                Password = password,
+                SecurityQuestion = securityQuestion,
+                SecurityAnswer = securityAnswer
             };
 
             st.SeniorTutorCode = GenerateUniqueSeniorTutorCode();

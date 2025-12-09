@@ -9,20 +9,53 @@ namespace DDD.Utils
     public static class MenuHelper
     {
         #region Student Menu
-        public static void StudentMenu(Student student, StudentService studentService, MeetingService meetingService, WellbeingService wellbeingService, MessageService messageService, IDataRepository repo)
+        public static void StudentMenu(Student student, StudentService studentService, MeetingService meetingService,
+            WellbeingService wellbeingService, MessageService messageService, IDataRepository repo,
+            PasswordResetService passwordResetService)
         {
+            // Check wellbeing report status on login
+            var wellbeingStatus = wellbeingService.GetWellbeingReportStatus(student);
+            if (wellbeingStatus.isOverdue)
+            {
+                Console.ForegroundColor = ConsoleColor.Red;
+                Console.WriteLine($"\n⚠ WELLBEING REPORT OVERDUE: {wellbeingStatus.daysOverdue} days overdue!");
+                Console.ResetColor();
+                InputHelper.PressEnterToContinue();
+            }
+            else if (wellbeingStatus.timeUntil.TotalDays < 2)
+            {
+                Console.ForegroundColor = ConsoleColor.Yellow;
+                Console.WriteLine($"\n⚠ Wellbeing report due soon: {wellbeingStatus.timeUntil.Days}d {wellbeingStatus.timeUntil.Hours}h remaining");
+                Console.ResetColor();
+                InputHelper.PressEnterToContinue();
+            }
+
             int choice;
             do
             {
-                Console.ForegroundColor
-            = ConsoleColor.White;
                 Console.Clear();
-                Console.WriteLine($"--- Student Menu ({student.Name}) ---", Console.ForegroundColor);
+
+                // Show wellbeing report status
+                wellbeingStatus = wellbeingService.GetWellbeingReportStatus(student);
+                Console.WriteLine($"=== Student Menu ({student.Name}) ===");
+                if (wellbeingStatus.isOverdue)
+                {
+                    Console.ForegroundColor = ConsoleColor.Red;
+                    Console.WriteLine($"⚠ Wellbeing Report: {wellbeingStatus.daysOverdue} days OVERDUE!");
+                    Console.ResetColor();
+                }
+                else
+                {
+                    Console.WriteLine($"Next wellbeing report due in: {wellbeingStatus.timeUntil.Days}d {wellbeingStatus.timeUntil.Hours}h");
+                }
+                Console.WriteLine("================================");
+
                 Console.WriteLine("1. Submit Wellbeing Report");
                 Console.WriteLine("2. View My Reports");
                 Console.WriteLine("3. Book Meeting with Personal Supervisor");
                 Console.WriteLine("4. View My Meetings");
                 Console.WriteLine("5. Messaging");
+                Console.WriteLine("6. Password & Security Settings");
                 Console.WriteLine("0. Logout");
 
                 choice = InputHelper.GetInt("Choice: ");
@@ -36,7 +69,14 @@ namespace DDD.Utils
                     case 2:
                         var reports = wellbeingService.GetReports(student);
                         if (!reports.Any()) Console.WriteLine("No reports found.");
-                        else foreach (var r in reports) Console.WriteLine($"{r.Date:u}: Score={r.Score}, Notes={r.Notes}");
+                        else
+                        {
+                            foreach (var r in reports)
+                            {
+                                var priority = r.IsHighPriority ? " ⚠ HIGH PRIORITY" : "";
+                                Console.WriteLine($"{r.Date:u}: Score={r.Score}, Notes={r.Notes}{priority}");
+                            }
+                        }
                         InputHelper.PressEnterToContinue();
                         break;
 
@@ -54,8 +94,74 @@ namespace DDD.Utils
                     case 5:
                         StudentMessagingMenu(student, messageService, repo);
                         break;
+
+                    case 6:
+                        StudentPasswordMenu(student, passwordResetService);
+                        break;
                 }
 
+            } while (choice != 0);
+        }
+
+        private static void StudentPasswordMenu(Student student, PasswordResetService passwordResetService)
+        {
+            int choice;
+            do
+            {
+                Console.Clear();
+                Console.WriteLine($"=== Password & Security Settings ===");
+                Console.WriteLine($"User: {student.Username}");
+                Console.WriteLine("1. Change Password");
+                Console.WriteLine("2. Set Security Question");
+                Console.WriteLine("0. Back");
+
+                choice = InputHelper.GetInt("Choice: ");
+
+                switch (choice)
+                {
+                    case 1:
+                        Console.WriteLine("\n=== Change Password ===");
+                        var current = InputHelper.GetString("Current password: ");
+                        var newPass = InputHelper.GetString("New password: ");
+                        var confirm = InputHelper.GetString("Confirm new password: ");
+
+                        if (newPass != confirm)
+                        {
+                            Console.WriteLine("Passwords don't match.");
+                        }
+                        else if (passwordResetService.ChangePassword(student.Username, current, newPass))
+                        {
+                            Console.WriteLine("Password changed successfully.");
+                            student.Password = newPass;
+                        }
+                        else
+                        {
+                            Console.WriteLine("Failed to change password. Current password may be incorrect.");
+                        }
+                        InputHelper.PressEnterToContinue();
+                        break;
+
+                    case 2:
+                        Console.WriteLine("\n=== Set Security Question ===");
+                        var question = InputHelper.GetString("Security question (e.g., 'What is your mother's maiden name?'): ");
+                        var answer = InputHelper.GetString("Answer: ");
+                        var confirmAnswer = InputHelper.GetString("Confirm answer: ");
+
+                        if (answer != confirmAnswer)
+                        {
+                            Console.WriteLine("Answers don't match.");
+                        }
+                        else if (passwordResetService.SetSecurityQuestion(student.Username, question, answer))
+                        {
+                            Console.WriteLine("Security question set successfully.");
+                        }
+                        else
+                        {
+                            Console.WriteLine("Failed to set security question.");
+                        }
+                        InputHelper.PressEnterToContinue();
+                        break;
+                }
             } while (choice != 0);
         }
 
@@ -66,6 +172,14 @@ namespace DDD.Utils
             string notes = InputHelper.GetString("Notes: ");
             wellbeingService.SubmitReport(student, score, notes);
             Console.WriteLine("Report submitted.");
+
+            if (score < 5)
+            {
+                Console.ForegroundColor = ConsoleColor.Yellow;
+                Console.WriteLine("⚠ Note: Your score indicates you may need support. Your senior tutor has been alerted.");
+                Console.ResetColor();
+            }
+
             InputHelper.PressEnterToContinue();
         }
 
@@ -185,17 +299,21 @@ namespace DDD.Utils
         #endregion
 
         #region Personal Supervisor Menu
-        public static void PersonalSupervisorMenu(PersonalSupervisor ps, PersonalSupervisorService psService, MeetingService meetingService, WellbeingService wellbeingService, MessageService messageService, IDataRepository repo)
+        public static void PersonalSupervisorMenu(PersonalSupervisor ps, PersonalSupervisorService psService,
+            MeetingService meetingService, WellbeingService wellbeingService, MessageService messageService,
+            IDataRepository repo, PasswordResetService passwordResetService)
         {
             int choice;
             do
             {
                 Console.Clear();
-                Console.WriteLine($"--- Personal Supervisor Menu ({ps.Name}) ---");
+                Console.WriteLine($"=== Personal Supervisor Menu ({ps.Name}) ===");
                 Console.WriteLine("1. View Supervisees");
-                Console.WriteLine("2. Book Meeting with a Student");
-                Console.WriteLine("3. View My Meetings");
-                Console.WriteLine("4. Messaging");
+                Console.WriteLine("2. View Supervisees' Wellbeing Reports");
+                Console.WriteLine("3. Book Meeting with a Student");
+                Console.WriteLine("4. View My Meetings");
+                Console.WriteLine("5. Messaging");
+                Console.WriteLine("6. Password & Security Settings");
                 Console.WriteLine("0. Logout");
 
                 choice = InputHelper.GetInt("Choice: ");
@@ -203,37 +321,182 @@ namespace DDD.Utils
                 switch (choice)
                 {
                     case 1:
-                        var supervisees = psService.GetSupervisees(ps);
-                        if (!supervisees.Any()) Console.WriteLine("No supervisees assigned.");
-                        else
-                        {
-                            Console.WriteLine("Supervisees:");
-                            for (int i = 0; i < supervisees.Count; i++)
-                            {
-                                var s = supervisees[i];
-                                int unread = messageService.GetUnreadCountForViewer(s.Id, ps.Id, "supervisor");
-                                Console.WriteLine($"{s.Id}: {s.Name} ({s.Username}) - {unread} unread");
-                            }
-                        }
-                        InputHelper.PressEnterToContinue();
+                        ViewSupervisees(ps, psService, wellbeingService, messageService);
                         break;
 
                     case 2:
-                        BookMeetingSupervisor(ps, psService, repo);
+                        ViewSuperviseesWellbeingReports(ps, psService, repo);
                         break;
 
                     case 3:
+                        BookMeetingSupervisor(ps, psService, repo);
+                        break;
+
+                    case 4:
                         var meetings = meetingService.GetMeetings(ps);
                         if (!meetings.Any()) Console.WriteLine("No meetings scheduled.");
                         else foreach (var m in meetings) Console.WriteLine($"{m.ScheduledTime:u}: Meeting with Student ID {m.StudentId}");
                         InputHelper.PressEnterToContinue();
                         break;
 
-                    case 4:
+                    case 5:
                         SupervisorMessagingMenu(ps, psService, messageService);
+                        break;
+
+                    case 6:
+                        SupervisorPasswordMenu(ps, passwordResetService);
                         break;
                 }
 
+            } while (choice != 0);
+        }
+
+        private static void ViewSupervisees(PersonalSupervisor ps, PersonalSupervisorService psService, WellbeingService wellbeingService, MessageService messageService)
+        {
+            var supervisees = psService.GetSupervisees(ps);
+            if (!supervisees.Any())
+            {
+                Console.WriteLine("No supervisees assigned.");
+                InputHelper.PressEnterToContinue();
+                return;
+            }
+
+            Console.WriteLine("=== My Supervisees ===");
+            for (int i = 0; i < supervisees.Count; i++)
+            {
+                var s = supervisees[i];
+                int unread = messageService.GetUnreadCountForViewer(s.Id, ps.Id, "supervisor");
+                var wellbeingStatus = wellbeingService.GetWellbeingReportStatus(s);
+                var status = wellbeingStatus.isOverdue ? $" ⚠ {wellbeingStatus.daysOverdue}d overdue" : "";
+                var missedStatus = s.HasMissedWellbeingReport ? " ⚠ MISSED REPORT" : "";
+                var lowScoreStatus = s.Reports?.Any(r => r.IsHighPriority) == true ? " ⚠ LOW SCORE" : "";
+
+                Console.WriteLine($"{s.Id}: {s.Name} ({s.Username}) - {unread} unread{status}{missedStatus}{lowScoreStatus}");
+            }
+            InputHelper.PressEnterToContinue();
+        }
+
+        private static void ViewSuperviseesWellbeingReports(PersonalSupervisor ps, PersonalSupervisorService psService, IDataRepository repo)
+        {
+            var supervisees = psService.GetSupervisees(ps);
+            if (!supervisees.Any())
+            {
+                Console.WriteLine("No supervisees assigned.");
+                InputHelper.PressEnterToContinue();
+                return;
+            }
+
+            Console.WriteLine("=== Supervisees' Wellbeing Reports ===");
+            Console.WriteLine("Select a student to view their reports:");
+
+            for (int i = 0; i < supervisees.Count; i++)
+            {
+                var s = supervisees[i];
+                var latestReport = s.Reports?.OrderByDescending(r => r.Date).FirstOrDefault();
+                var latestScore = latestReport != null ? $"Latest: {latestReport.Score}/10" : "No reports";
+                var overdue = s.HasMissedWellbeingReport ? " ⚠ MISSED" : "";
+                Console.WriteLine($"{i + 1}. {s.Name} - {latestScore}{overdue}");
+            }
+
+            int idx = InputHelper.GetInt("Choice (0 to cancel): ") - 1;
+            if (idx < 0 || idx >= supervisees.Count)
+            {
+                Console.WriteLine("Cancelled or invalid choice.");
+                InputHelper.PressEnterToContinue();
+                return;
+            }
+
+            var selectedStudent = supervisees[idx];
+
+            Console.WriteLine($"\n=== Wellbeing Reports for {selectedStudent.Name} ===");
+
+            var reports = selectedStudent.Reports?.OrderByDescending(r => r.Date).ToList();
+            if (reports == null || !reports.Any())
+            {
+                Console.WriteLine("No wellbeing reports submitted.");
+            }
+            else
+            {
+                foreach (var report in reports)
+                {
+                    var priority = report.IsHighPriority ? " ⚠ HIGH PRIORITY" : "";
+                    Console.WriteLine($"Date: {report.Date:yyyy-MM-dd}");
+                    Console.WriteLine($"Score: {report.Score}/10{priority}");
+                    Console.WriteLine($"Notes: {report.Notes}");
+                    Console.WriteLine("---");
+                }
+
+                // Show statistics
+                var averageScore = reports.Average(r => r.Score);
+                var lowCount = reports.Count(r => r.Score < 5);
+                Console.WriteLine($"\nStatistics:");
+                Console.WriteLine($"Average score: {averageScore:F1}/10");
+                Console.WriteLine($"Low scores (<5): {lowCount}");
+                Console.WriteLine($"Total reports: {reports.Count}");
+            }
+
+            InputHelper.PressEnterToContinue();
+        }
+
+        private static void SupervisorPasswordMenu(PersonalSupervisor ps, PasswordResetService passwordResetService)
+        {
+            int choice;
+            do
+            {
+                Console.Clear();
+                Console.WriteLine($"=== Password & Security Settings ===");
+                Console.WriteLine($"User: {ps.Username}");
+                Console.WriteLine("1. Change Password");
+                Console.WriteLine("2. Set Security Question");
+                Console.WriteLine("0. Back");
+
+                choice = InputHelper.GetInt("Choice: ");
+
+                switch (choice)
+                {
+                    case 1:
+                        Console.WriteLine("\n=== Change Password ===");
+                        var current = InputHelper.GetString("Current password: ");
+                        var newPass = InputHelper.GetString("New password: ");
+                        var confirm = InputHelper.GetString("Confirm new password: ");
+
+                        if (newPass != confirm)
+                        {
+                            Console.WriteLine("Passwords don't match.");
+                        }
+                        else if (passwordResetService.ChangePassword(ps.Username, current, newPass))
+                        {
+                            Console.WriteLine("Password changed successfully.");
+                            ps.Password = newPass;
+                        }
+                        else
+                        {
+                            Console.WriteLine("Failed to change password. Current password may be incorrect.");
+                        }
+                        InputHelper.PressEnterToContinue();
+                        break;
+
+                    case 2:
+                        Console.WriteLine("\n=== Set Security Question ===");
+                        var question = InputHelper.GetString("Security question (e.g., 'What is your mother's maiden name?'): ");
+                        var answer = InputHelper.GetString("Answer: ");
+                        var confirmAnswer = InputHelper.GetString("Confirm answer: ");
+
+                        if (answer != confirmAnswer)
+                        {
+                            Console.WriteLine("Answers don't match.");
+                        }
+                        else if (passwordResetService.SetSecurityQuestion(ps.Username, question, answer))
+                        {
+                            Console.WriteLine("Security question set successfully.");
+                        }
+                        else
+                        {
+                            Console.WriteLine("Failed to set security question.");
+                        }
+                        InputHelper.PressEnterToContinue();
+                        break;
+                }
             } while (choice != 0);
         }
 
@@ -249,7 +512,6 @@ namespace DDD.Utils
 
             Console.WriteLine("Select a student:");
             for (int i = 0; i < students.Count; i++) Console.WriteLine($"{i + 1}. {students[i].Name}");
-
             int idx = InputHelper.GetInt("Choice: ") - 1;
             if (idx < 0 || idx >= students.Count)
             {
@@ -376,13 +638,34 @@ namespace DDD.Utils
         #endregion
 
         #region Senior Tutor Menu
-        public static void SeniorTutorMenu(SeniorTutor st, SeniorTutorService stService, IDataRepository repo, MessageService messageService)
+        public static void SeniorTutorMenu(SeniorTutor st, SeniorTutorService stService, IDataRepository repo,
+            MessageService messageService, WellbeingService wellbeingService, PasswordResetService passwordResetService)
         {
+            // Check for alerts on login
+            var alerts = wellbeingService.GetActiveAlerts();
+            if (alerts.Any())
+            {
+                Console.ForegroundColor = ConsoleColor.Red;
+                Console.WriteLine($"\n⚠ {alerts.Count} ACTIVE WELLBEING ALERT(S)!");
+                Console.ResetColor();
+                InputHelper.PressEnterToContinue();
+            }
+
             int choice;
             do
             {
                 Console.Clear();
-                Console.WriteLine($"--- Senior Tutor Menu ({st.Name}) ---");
+                Console.WriteLine($"=== Senior Tutor Menu ({st.Name}) ===");
+
+                // Show alert count
+                alerts = wellbeingService.GetActiveAlerts();
+                if (alerts.Any())
+                {
+                    Console.ForegroundColor = ConsoleColor.Red;
+                    Console.WriteLine($"⚠ {alerts.Count} active wellbeing alert(s)");
+                    Console.ResetColor();
+                }
+
                 Console.WriteLine("1. Create Student");
                 Console.WriteLine("2. Create Personal Supervisor");
                 Console.WriteLine("3. Create Senior Tutor");
@@ -392,6 +675,9 @@ namespace DDD.Utils
                 Console.WriteLine("7. View ALL Meetings & Reports");
                 Console.WriteLine("8. Show database path");
                 Console.WriteLine("9. View All Conversations");
+                Console.WriteLine("10. View High Priority Students");
+                Console.WriteLine("11. View Active Wellbeing Alerts");
+                Console.WriteLine("12. Password & Security Settings");
                 Console.WriteLine("0. Logout");
 
                 choice = InputHelper.GetInt("Choice: ");
@@ -411,7 +697,7 @@ namespace DDD.Utils
                         AssignStudentToSupervisor(stService);
                         break;
                     case 5:
-                        ListAllStudents(stService, repo);
+                        ListAllStudents(stService, repo, wellbeingService);
                         break;
                     case 6:
                         ListAllPersonalSupervisors(stService);
@@ -426,9 +712,177 @@ namespace DDD.Utils
                     case 9:
                         SeniorTutorViewAllConversations(stService, messageService);
                         break;
+                    case 10:
+                        ViewHighPriorityStudents(wellbeingService, repo);
+                        break;
+                    case 11:
+                        ViewActiveAlerts(wellbeingService, repo);
+                        break;
+                    case 12:
+                        SeniorTutorPasswordMenu(st, passwordResetService);
+                        break;
                 }
 
             } while (choice != 0);
+        }
+
+        private static void SeniorTutorPasswordMenu(SeniorTutor st, PasswordResetService passwordResetService)
+        {
+            int choice;
+            do
+            {
+                Console.Clear();
+                Console.WriteLine($"=== Password & Security Settings ===");
+                Console.WriteLine($"User: {st.Username}");
+                Console.WriteLine("1. Change Password");
+                Console.WriteLine("2. Set Security Question");
+                Console.WriteLine("0. Back");
+
+                choice = InputHelper.GetInt("Choice: ");
+
+                switch (choice)
+                {
+                    case 1:
+                        Console.WriteLine("\n=== Change Password ===");
+                        var current = InputHelper.GetString("Current password: ");
+                        var newPass = InputHelper.GetString("New password: ");
+                        var confirm = InputHelper.GetString("Confirm new password: ");
+
+                        if (newPass != confirm)
+                        {
+                            Console.WriteLine("Passwords don't match.");
+                        }
+                        else if (passwordResetService.ChangePassword(st.Username, current, newPass))
+                        {
+                            Console.WriteLine("Password changed successfully.");
+                            st.Password = newPass;
+                        }
+                        else
+                        {
+                            Console.WriteLine("Failed to change password. Current password may be incorrect.");
+                        }
+                        InputHelper.PressEnterToContinue();
+                        break;
+
+                    case 2:
+                        Console.WriteLine("\n=== Set Security Question ===");
+                        var question = InputHelper.GetString("Security question (e.g., 'What is your mother's maiden name?'): ");
+                        var answer = InputHelper.GetString("Answer: ");
+                        var confirmAnswer = InputHelper.GetString("Confirm answer: ");
+
+                        if (answer != confirmAnswer)
+                        {
+                            Console.WriteLine("Answers don't match.");
+                        }
+                        else if (passwordResetService.SetSecurityQuestion(st.Username, question, answer))
+                        {
+                            Console.WriteLine("Security question set successfully.");
+                        }
+                        else
+                        {
+                            Console.WriteLine("Failed to set security question.");
+                        }
+                        InputHelper.PressEnterToContinue();
+                        break;
+                }
+            } while (choice != 0);
+        }
+
+        private static void ViewHighPriorityStudents(WellbeingService wellbeingService, IDataRepository repo)
+        {
+            Console.Clear();
+            Console.WriteLine("=== High Priority Students ===");
+            Console.WriteLine("Students with wellbeing scores under 5:");
+
+            var highPriorityStudents = wellbeingService.GetHighPriorityStudents();
+            var missedReportStudents = wellbeingService.GetStudentsWithMissedReports();
+
+            if (!highPriorityStudents.Any() && !missedReportStudents.Any())
+            {
+                Console.WriteLine("No high priority students at this time.");
+            }
+            else
+            {
+                if (highPriorityStudents.Any())
+                {
+                    Console.WriteLine("\n🔴 LOW WELLBEING SCORES:");
+                    foreach (var student in highPriorityStudents)
+                    {
+                        var latestReport = student.Reports?.OrderByDescending(r => r.Date).FirstOrDefault();
+                        var supervisorName = student.PersonalSupervisorId == 0
+                            ? "(none)"
+                            : (repo.GetSupervisorById(student.PersonalSupervisorId)?.Name ?? "(unknown)");
+
+                        Console.WriteLine($"  Student: {student.Name} (ID: {student.Id})");
+                        Console.WriteLine($"  Latest score: {latestReport?.Score ?? 0}");
+                        Console.WriteLine($"  Supervisor: {supervisorName}");
+                        Console.WriteLine($"  Last report: {student.LastWellbeingReportDate:yyyy-MM-dd}");
+                        Console.WriteLine();
+                    }
+                }
+
+                if (missedReportStudents.Any())
+                {
+                    Console.WriteLine("\n⚠ MISSED WELLBEING REPORTS:");
+                    foreach (var student in missedReportStudents)
+                    {
+                        var supervisorName = student.PersonalSupervisorId == 0
+                            ? "(none)"
+                            : (repo.GetSupervisorById(student.PersonalSupervisorId)?.Name ?? "(unknown)");
+
+                        Console.WriteLine($"  Student: {student.Name} (ID: {student.Id})");
+                        Console.WriteLine($"  Missed reports: {student.MissedReportCount}");
+                        Console.WriteLine($"  Supervisor: {supervisorName}");
+                        Console.WriteLine($"  Last report: {student.LastWellbeingReportDate:yyyy-MM-dd}");
+                        Console.WriteLine();
+                    }
+                }
+            }
+
+            InputHelper.PressEnterToContinue();
+        }
+
+        private static void ViewActiveAlerts(WellbeingService wellbeingService, IDataRepository repo)
+        {
+            Console.Clear();
+            Console.WriteLine("=== Active Wellbeing Alerts ===");
+
+            var alerts = wellbeingService.GetActiveAlerts();
+
+            if (!alerts.Any())
+            {
+                Console.WriteLine("No active alerts.");
+            }
+            else
+            {
+                foreach (var alert in alerts)
+                {
+                    Console.WriteLine($"\nAlert ID: {alert.Id}");
+                    Console.WriteLine($"Student: {alert.StudentName} (ID: {alert.StudentId})");
+                    Console.WriteLine($"Reason: {alert.Reason}");
+                    Console.WriteLine($"Date: {alert.AlertDate:yyyy-MM-dd HH:mm}");
+
+                    if (alert.Reason == "low_score")
+                    {
+                        Console.WriteLine("Type: Low wellbeing score (<5)");
+                    }
+                    else if (alert.Reason == "missed_report")
+                    {
+                        Console.WriteLine("Type: Missed wellbeing report");
+                    }
+
+                    Console.WriteLine("\nOptions: (R)esolve alert, (Enter) to continue");
+                    var opt = Console.ReadLine()?.Trim().ToUpper();
+
+                    if (opt == "R")
+                    {
+                        wellbeingService.ResolveAlert(alert.Id);
+                        Console.WriteLine("Alert resolved.");
+                    }
+                }
+            }
+
+            InputHelper.PressEnterToContinue();
         }
 
         private static void SeniorTutorViewAllConversations(SeniorTutorService stService, MessageService messageService)
@@ -504,7 +958,7 @@ namespace DDD.Utils
         }
         #endregion
 
-        #region Senior Tutor helpers (existing methods reused)
+        #region Senior Tutor helpers
 
         private static void CreateStudent(SeniorTutorService stService)
         {
@@ -530,11 +984,16 @@ namespace DDD.Utils
                 return;
             }
 
-            var s = stService.CreateStudent(u, n, p, yearGroup);
+            Console.Write("Security question (optional, for password recovery): ");
+            var sq = Console.ReadLine() ?? "";
+
+            Console.Write("Security answer (optional): ");
+            var sa = Console.ReadLine() ?? "";
+
+            var s = stService.CreateStudent(u, n, p, yearGroup, sq, sa);
             Console.WriteLine($"Student created with Id {s.Id} (External StudentID: {s.StudentCode})");
             InputHelper.PressEnterToContinue();
         }
-
 
         private static void CreatePersonalSupervisor(SeniorTutorService stService)
         {
@@ -545,7 +1004,13 @@ namespace DDD.Utils
             Console.Write("Password: ");
             var p = Console.ReadLine() ?? "";
 
-            var sup = stService.CreatePersonalSupervisor(u, n, p);
+            Console.Write("Security question (optional, for password recovery): ");
+            var sq = Console.ReadLine() ?? "";
+
+            Console.Write("Security answer (optional): ");
+            var sa = Console.ReadLine() ?? "";
+
+            var sup = stService.CreatePersonalSupervisor(u, n, p, sq, sa);
             Console.WriteLine($"Supervisor created with Id {sup.Id}");
             InputHelper.PressEnterToContinue();
         }
@@ -559,7 +1024,13 @@ namespace DDD.Utils
             Console.Write("Password: ");
             var p = Console.ReadLine() ?? "";
 
-            var st = stService.CreateSeniorTutor(u, n, p);
+            Console.Write("Security question (optional, for password recovery): ");
+            var sq = Console.ReadLine() ?? "";
+
+            Console.Write("Security answer (optional): ");
+            var sa = Console.ReadLine() ?? "";
+
+            var st = stService.CreateSeniorTutor(u, n, p, sq, sa);
             Console.WriteLine($"Senior tutor created with Id {st.Id}");
             InputHelper.PressEnterToContinue();
         }
@@ -593,7 +1064,7 @@ namespace DDD.Utils
             InputHelper.PressEnterToContinue();
         }
 
-        private static void ListAllStudents(SeniorTutorService stService, IDataRepository repo)
+        private static void ListAllStudents(SeniorTutorService stService, IDataRepository repo, WellbeingService wellbeingService)
         {
             var students = stService.GetAllStudents();
             Console.WriteLine("All students:");
@@ -604,8 +1075,14 @@ namespace DDD.Utils
                     ? "(none)"
                     : (repo.GetSupervisorById(s.PersonalSupervisorId)?.Name ?? "(unknown)");
 
+                var wellbeingStatus = wellbeingService.GetWellbeingReportStatus(s);
+                var status = wellbeingStatus.isOverdue ? $" ⚠ {wellbeingStatus.daysOverdue}d overdue" : "";
+
+                var missedStatus = s.HasMissedWellbeingReport ? " ⚠ MISSED REPORT" : "";
+                var lowScoreStatus = s.Reports?.Any(r => r.IsHighPriority) == true ? " ⚠ LOW SCORE" : "";
+
                 Console.WriteLine(
-                    $"{s.Id}) {s.Username} - {s.Name} - Supervisor: {supervisorName} - Meetings: {s.Meetings.Count} - Reports: {s.Reports.Count}"
+                    $"{s.Id}) {s.Username} - {s.Name} - Supervisor: {supervisorName}{status}{missedStatus}{lowScoreStatus}"
                 );
             }
 
@@ -651,7 +1128,8 @@ namespace DDD.Utils
                 {
                     foreach (var r in s.Reports)
                     {
-                        Console.WriteLine($"  Report {r.Id} Score:{r.Score} Date:{r.Date:u} Notes:{r.Notes}");
+                        var priority = r.IsHighPriority ? " ⚠ HIGH PRIORITY" : "";
+                        Console.WriteLine($"  Report {r.Id} Score:{r.Score} Date:{r.Date:u} Notes:{r.Notes}{priority}");
                     }
                 }
             }

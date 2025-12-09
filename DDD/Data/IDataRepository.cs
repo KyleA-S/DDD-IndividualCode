@@ -11,6 +11,8 @@ namespace DDD.Data
         Student GetStudentByCode(string studentCode);
         void SaveStudent(Student student);
         List<Student> GetAllStudents();
+        List<Student> GetStudentsWithLowWellbeing();
+        List<Student> GetStudentsWithMissedReports();
 
         // Personal Supervisors
         PersonalSupervisor GetSupervisorById(int id);
@@ -36,5 +38,16 @@ namespace DDD.Data
         int GetUnreadCount(int studentId, int supervisorId, string readerRole);
         List<Message> GetMessagesByStudent(int studentId);
         List<Message> GetMessagesBySupervisor(int supervisorId);
+
+        // Wellbeing Alerts
+        void AddWellbeingAlert(WellbeingAlert alert);
+        List<WellbeingAlert> GetActiveWellbeingAlerts();
+        void ResolveAlert(int alertId);
+
+        // Password Reset
+        bool UpdatePassword(string username, string newPassword);
+        bool SetSecurityQuestion(string username, string question, string answer);
+        bool VerifySecurityAnswer(string username, string answer);
+        string GetSecurityQuestion(string username);
     }
 }
